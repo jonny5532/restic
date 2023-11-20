@@ -94,6 +94,7 @@ type Archiver struct {
 const (
 	ChangeIgnoreCtime = 1 << iota
 	ChangeIgnoreInode
+	ChangeIgnoreSizeIfZero
 )
 
 // Options is used to configure the archiver.
@@ -488,13 +489,16 @@ func (arch *Archiver) Save(ctx context.Context, snPath, target string, previous 
 // to the contents of node, which describes the same path in the parent backup.
 // It should only be run for regular files.
 func fileChanged(fi os.FileInfo, node *restic.Node, ignoreFlags uint) bool {
+	checkSizeIfZero := ignoreFlags&ChangeIgnoreSizeIfZero == 0
+	fileSize := uint64(fi.Size())
+
 	switch {
 	case node == nil:
 		return true
 	case node.Type != "file":
 		// We're only called for regular files, so this is a type change.
 		return true
-	case uint64(fi.Size()) != node.Size:
+	case fileSize != node.Size && (checkSizeIfZero || fileSize>0):
 		return true
 	case !fi.ModTime().Equal(node.ModTime):
 		return true

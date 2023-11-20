@@ -107,6 +107,7 @@ type BackupOptions struct {
 	WithAtime         bool
 	IgnoreInode       bool
 	IgnoreCtime       bool
+	IgnoreSizeIfZero  bool
 	UseFsSnapshot     bool
 	DryRun            bool
 	ReadConcurrency   uint
@@ -152,6 +153,7 @@ func init() {
 	f.BoolVar(&backupOptions.WithAtime, "with-atime", false, "store the atime for all files and directories")
 	f.BoolVar(&backupOptions.IgnoreInode, "ignore-inode", false, "ignore inode number changes when checking for modified files")
 	f.BoolVar(&backupOptions.IgnoreCtime, "ignore-ctime", false, "ignore ctime changes when checking for modified files")
+	f.BoolVar(&backupOptions.IgnoreSizeIfZero, "ignore-size-if-zero", false, "don't compare size if zero when checking for modified files")
 	f.BoolVarP(&backupOptions.DryRun, "dry-run", "n", false, "do not upload or write any data, just show what would be done")
 	f.BoolVar(&backupOptions.NoScan, "no-scan", false, "do not run scanner to estimate size of backup")
 	if runtime.GOOS == "windows" {
@@ -659,6 +661,9 @@ func runBackup(ctx context.Context, opts BackupOptions, gopts GlobalOptions, ter
 	}
 	if opts.IgnoreCtime {
 		arch.ChangeIgnoreFlags |= archiver.ChangeIgnoreCtime
+	}
+	if opts.IgnoreSizeIfZero {
+		arch.ChangeIgnoreFlags |= archiver.ChangeIgnoreSizeIfZero
 	}
 
 	snapshotOpts := archiver.SnapshotOptions{
