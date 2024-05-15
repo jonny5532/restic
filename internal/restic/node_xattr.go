@@ -4,6 +4,7 @@
 package restic
 
 import (
+	"os"
 	"syscall"
 
 	"github.com/restic/restic/internal/errors"
@@ -22,6 +23,14 @@ func Getxattr(path, name string) ([]byte, error) {
 func Listxattr(path string) ([]string, error) {
 	l, err := xattr.LList(path)
 	return l, handleXattrErr(err)
+}
+
+func IsListxattrPermissionError(err error) bool {
+	var xerr *xattr.Error
+	if errors.As(err, &xerr) {
+		return xerr.Op == "xattr.list" && errors.Is(xerr.Err, os.ErrPermission)
+	}
+	return false
 }
 
 // Setxattr associates name and data together as an attribute of path.
@@ -46,4 +55,14 @@ func handleXattrErr(err error) error {
 	default:
 		return errors.WithStack(e)
 	}
+}
+
+// restoreGenericAttributes is no-op.
+func (node *Node) restoreGenericAttributes(_ string, warn func(msg string)) error {
+	return node.handleAllUnknownGenericAttributesFound(warn)
+}
+
+// fillGenericAttributes is a no-op.
+func (node *Node) fillGenericAttributes(_ string, _ os.FileInfo, _ *statT) (allowExtended bool, err error) {
+	return true, nil
 }

@@ -38,7 +38,7 @@ Exit status is 0 if the command was successful, and non-zero if there was any er
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCheck(cmd.Context(), checkOptions, globalOptions, args)
 	},
-	PreRunE: func(cmd *cobra.Command, args []string) error {
+	PreRunE: func(_ *cobra.Command, _ []string) error {
 		return checkFlags(checkOptions)
 	},
 }
@@ -199,25 +199,16 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	}
 
 	cleanup := prepareCheckCache(opts, &gopts)
-	AddCleanupHandler(func(code int) (int, error) {
-		cleanup()
-		return code, nil
-	})
-
-	repo, err := OpenRepository(ctx, gopts)
-	if err != nil {
-		return err
-	}
+	defer cleanup()
 
 	if !gopts.NoLock {
 		Verbosef("create exclusive lock for repository\n")
-		var lock *restic.Lock
-		lock, ctx, err = lockRepoExclusive(ctx, repo, gopts.RetryLock, gopts.JSON)
-		defer unlockRepo(lock)
-		if err != nil {
-			return err
-		}
 	}
+	ctx, repo, unlock, err := openWithExclusiveLock(ctx, gopts, gopts.NoLock)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	chkr := checker.New(repo, opts.CheckUnused)
 	err = chkr.LoadSnapshots(ctx)
@@ -228,15 +219,23 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	Verbosef("load indexes\n")
 	bar := newIndexProgress(gopts.Quiet, gopts.JSON)
 	hints, errs := chkr.LoadIndex(ctx, bar)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	errorsFound := false
 	suggestIndexRebuild := false
+	suggestLegacyIndexRebuild := false
 	mixedFound := false
 	for _, hint := range hints {
 		switch hint.(type) {
-		case *checker.ErrDuplicatePacks, *checker.ErrOldIndexFormat:
+		case *checker.ErrDuplicatePacks:
 			Printf("%v\n", hint)
 			suggestIndexRebuild = true
+		case *checker.ErrOldIndexFormat:
+			Warnf("error: %v\n", hint)
+			suggestLegacyIndexRebuild = true
+			errorsFound = true
 		case *checker.ErrMixedPack:
 			Printf("%v\n", hint)
 			mixedFound = true
@@ -247,7 +246,10 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	}
 
 	if suggestIndexRebuild {
-		Printf("Duplicate packs/old indexes are non-critical, you can run `restic repair index' to correct this.\n")
+		Printf("Duplicate packs are non-critical, you can run `restic repair index' to correct this.\n")
+	}
+	if suggestLegacyIndexRebuild {
+		Warnf("Found indexes using the legacy format, you must run `restic repair index' to correct this.\n")
 	}
 	if mixedFound {
 		Printf("Mixed packs with tree and data blobs are non-critical, you can run `restic prune` to correct this.\n")
@@ -280,6 +282,9 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 
 	if orphanedPacks > 0 {
 		Verbosef("%d additional files were found in the repo, which likely contain duplicate data.\nThis is non-critical, you can run `restic prune` to correct this.\n", orphanedPacks)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	Verbosef("check snapshots, trees and blobs\n")
@@ -314,9 +319,16 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	// Must happen after `errChan` is read from in the above loop to avoid
 	// deadlocking in the case of errors.
 	wg.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	if opts.CheckUnused {
-		for _, id := range chkr.UnusedBlobs(ctx) {
+		unused, err := chkr.UnusedBlobs(ctx)
+		if err != nil {
+			return err
+		}
+		for _, id := range unused {
 			Verbosef("unused blob %v\n", id)
 			errorsFound = true
 		}
@@ -336,20 +348,18 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 			errorsFound = true
 			Warnf("%v\n", err)
 			if err, ok := err.(*checker.ErrPackData); ok {
-				if strings.Contains(err.Error(), "wrong data returned, hash is") {
-					salvagePacks = append(salvagePacks, err.PackID)
-				}
+				salvagePacks = append(salvagePacks, err.PackID)
 			}
 		}
 		p.Done()
 
 		if len(salvagePacks) > 0 {
-			Warnf("\nThe repository contains pack files with damaged blobs. These blobs must be removed to repair the repository. This can be done using the following commands:\n\n")
-			var strIds []string
+			Warnf("\nThe repository contains pack files with damaged blobs. These blobs must be removed to repair the repository. This can be done using the following commands. Please read the troubleshooting guide at https://restic.readthedocs.io/en/stable/077_troubleshooting.html first.\n\n")
+			var strIDs []string
 			for _, id := range salvagePacks {
-				strIds = append(strIds, id.String())
+				strIDs = append(strIDs, id.String())
 			}
-			Warnf("RESTIC_FEATURES=repair-packs-v1 restic repair packs %v\nrestic repair snapshots --forget\n\n", strings.Join(strIds, " "))
+			Warnf("restic repair packs %v\nrestic repair snapshots --forget\n\n", strings.Join(strIDs, " "))
 			Warnf("Corrupted blobs are either caused by hardware problems or bugs in restic. Please open an issue at https://github.com/restic/restic/issues/new/choose for further troubleshooting!\n")
 		}
 	}
@@ -395,10 +405,13 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 		doReadData(packs)
 	}
 
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	if errorsFound {
 		return errors.Fatal("repository contains errors")
 	}
-
 	Verbosef("no errors were found\n")
 
 	return nil
@@ -417,7 +430,7 @@ func selectPacksByBucket(allPacks map[restic.ID]int64, bucket, totalBuckets uint
 	return packs
 }
 
-// selectRandomPacksByPercentage selects the given percentage of packs which are randomly choosen.
+// selectRandomPacksByPercentage selects the given percentage of packs which are randomly chosen.
 func selectRandomPacksByPercentage(allPacks map[restic.ID]int64, percentage float64) map[restic.ID]int64 {
 	packCount := len(allPacks)
 	packsToCheck := int(float64(packCount) * (percentage / 100.0))

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/restic/restic/internal/backend"
 	"github.com/restic/restic/internal/checker"
 	"github.com/restic/restic/internal/crypto"
 	"github.com/restic/restic/internal/index"
@@ -167,9 +166,9 @@ func TestMasterMergeFinalIndexes(t *testing.T) {
 	rtest.Equals(t, 1, idxCount)
 
 	blobCount := 0
-	mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
+	rtest.OK(t, mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
 		blobCount++
-	})
+	}))
 	rtest.Equals(t, 2, blobCount)
 
 	blobs := mIdx.Lookup(bhInIdx1)
@@ -199,9 +198,9 @@ func TestMasterMergeFinalIndexes(t *testing.T) {
 	rtest.Equals(t, []restic.PackedBlob{blob2}, blobs)
 
 	blobCount = 0
-	mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
+	rtest.OK(t, mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
 		blobCount++
-	})
+	}))
 	rtest.Equals(t, 2, blobCount)
 }
 
@@ -320,9 +319,9 @@ func BenchmarkMasterIndexEach(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		entries := 0
-		mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
+		rtest.OK(b, mIdx.Each(context.TODO(), func(pb restic.PackedBlob) {
 			entries++
-		})
+		}))
 	}
 }
 
@@ -363,18 +362,9 @@ func testIndexSave(t *testing.T, version uint) {
 		t.Fatal(err)
 	}
 
-	obsoletes, err := repo.Index().Save(context.TODO(), repo, nil, nil, nil)
+	err = repo.Index().Save(context.TODO(), repo, nil, nil, restic.MasterIndexSaveOpts{})
 	if err != nil {
 		t.Fatalf("unable to save new index: %v", err)
-	}
-
-	for id := range obsoletes {
-		t.Logf("remove index %v", id.Str())
-		h := backend.Handle{Type: restic.IndexFile, Name: id.String()}
-		err = repo.Backend().Remove(context.TODO(), h)
-		if err != nil {
-			t.Errorf("error removing index %v: %v", id, err)
-		}
 	}
 
 	checker := checker.New(repo, false)

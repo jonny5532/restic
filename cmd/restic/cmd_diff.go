@@ -27,6 +27,10 @@ directory:
 * U  The metadata (access mode, timestamps, ...) for the item was updated
 * M  The file's content was modified
 * T  The type was changed, e.g. a file was made a symlink
+* ?  Bitrot detected: The file's content has changed but all metadata is the same
+
+Metadata comparison will likely not work if a backup was created using the
+'--ignore-inode' or '--ignore-ctime' option.
 
 To only compare files in specific subfolders, you can use the
 "<snapshotID>:<subfolder>" syntax, where "subfolder" is a path within the
@@ -57,7 +61,7 @@ func init() {
 	f.BoolVar(&diffOptions.ShowMetadata, "metadata", false, "print changes in metadata")
 }
 
-func loadSnapshot(ctx context.Context, be restic.Lister, repo restic.Repository, desc string) (*restic.Snapshot, string, error) {
+func loadSnapshot(ctx context.Context, be restic.Lister, repo restic.LoaderUnpacked, desc string) (*restic.Snapshot, string, error) {
 	sn, subfolder, err := restic.FindSnapshot(ctx, be, repo, desc)
 	if err != nil {
 		return nil, "", errors.Fatal(err.Error())
@@ -67,7 +71,7 @@ func loadSnapshot(ctx context.Context, be restic.Lister, repo restic.Repository,
 
 // Comparer collects all things needed to compare two snapshots.
 type Comparer struct {
-	repo        restic.Repository
+	repo        restic.BlobLoader
 	opts        DiffOptions
 	printChange func(change *Change)
 }
@@ -143,7 +147,7 @@ type DiffStatsContainer struct {
 }
 
 // updateBlobs updates the blob counters in the stats struct.
-func updateBlobs(repo restic.Repository, blobs restic.BlobSet, stats *DiffStat) {
+func updateBlobs(repo restic.Loader, blobs restic.BlobSet, stats *DiffStat) {
 	for h := range blobs {
 		switch h.Type {
 		case restic.DataBlob:
@@ -272,6 +276,16 @@ func (c *Comparer) diffTree(ctx context.Context, stats *DiffStatsContainer, pref
 				!reflect.DeepEqual(node1.Content, node2.Content) {
 				mod += "M"
 				stats.ChangedFiles++
+
+				node1NilContent := *node1
+				node2NilContent := *node2
+				node1NilContent.Content = nil
+				node2NilContent.Content = nil
+				// the bitrot detection may not work if `backup --ignore-inode` or `--ignore-ctime` were used
+				if node1NilContent.Equals(node2NilContent) {
+					// probable bitrot detected
+					mod += "?"
+				}
 			} else if c.opts.ShowMetadata && !node1.Equals(*node2) {
 				mod += "U"
 			}
@@ -330,19 +344,11 @@ func runDiff(ctx context.Context, opts DiffOptions, gopts GlobalOptions, args []
 		return errors.Fatalf("specify two snapshot IDs")
 	}
 
-	repo, err := OpenRepository(ctx, gopts)
+	ctx, repo, unlock, err := openWithReadLock(ctx, gopts, gopts.NoLock)
 	if err != nil {
 		return err
 	}
-
-	if !gopts.NoLock {
-		var lock *restic.Lock
-		lock, ctx, err = lockRepo(ctx, repo, gopts.RetryLock, gopts.JSON)
-		defer unlockRepo(lock)
-		if err != nil {
-			return err
-		}
-	}
+	defer unlock()
 
 	// cache snapshots listing
 	be, err := restic.MemorizeList(ctx, repo, restic.SnapshotFile)
@@ -387,7 +393,7 @@ func runDiff(ctx context.Context, opts DiffOptions, gopts GlobalOptions, args []
 
 	c := &Comparer{
 		repo: repo,
-		opts: diffOptions,
+		opts: opts,
 		printChange: func(change *Change) {
 			Printf("%-5s%v\n", change.Modifier, change.Path)
 		},
@@ -404,7 +410,7 @@ func runDiff(ctx context.Context, opts DiffOptions, gopts GlobalOptions, args []
 	}
 
 	if gopts.Quiet {
-		c.printChange = func(change *Change) {}
+		c.printChange = func(_ *Change) {}
 	}
 
 	stats := &DiffStatsContainer{

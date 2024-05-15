@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -74,7 +75,7 @@ func (p *Packer) Finalize() error {
 	p.m.Lock()
 	defer p.m.Unlock()
 
-	header, err := p.makeHeader()
+	header, err := makeHeader(p.blobs)
 	if err != nil {
 		return err
 	}
@@ -83,6 +84,12 @@ func (p *Packer) Finalize() error {
 	nonce := crypto.NewRandomNonce()
 	encryptedHeader = append(encryptedHeader, nonce...)
 	encryptedHeader = p.k.Seal(encryptedHeader, nonce, header, nil)
+	encryptedHeader = binary.LittleEndian.AppendUint32(encryptedHeader, uint32(len(encryptedHeader)))
+
+	if err := verifyHeader(p.k, encryptedHeader, p.blobs); err != nil {
+		//nolint:revive // ignore linter warnings about error message spelling
+		return fmt.Errorf("Detected data corruption while writing pack-file header: %w\nCorrupted data is either caused by hardware issues or software bugs. Please open an issue at https://github.com/restic/restic/issues/new/choose for further troubleshooting.", err)
+	}
 
 	// append the header
 	n, err := p.wr.Write(encryptedHeader)
@@ -90,18 +97,33 @@ func (p *Packer) Finalize() error {
 		return errors.Wrap(err, "Write")
 	}
 
-	hdrBytes := len(encryptedHeader)
-	if n != hdrBytes {
+	if n != len(encryptedHeader) {
 		return errors.New("wrong number of bytes written")
 	}
+	p.bytes += uint(len(encryptedHeader))
 
-	// write length
-	err = binary.Write(p.wr, binary.LittleEndian, uint32(hdrBytes))
+	return nil
+}
+
+func verifyHeader(k *crypto.Key, header []byte, expected []restic.Blob) error {
+	// do not offer a way to skip the pack header verification, as pack headers are usually small enough
+	// to not result in a significant performance impact
+
+	decoded, hdrSize, err := List(k, bytes.NewReader(header), int64(len(header)))
 	if err != nil {
-		return errors.Wrap(err, "binary.Write")
+		return fmt.Errorf("header decoding failed: %w", err)
 	}
-	p.bytes += uint(hdrBytes + binary.Size(uint32(0)))
-
+	if hdrSize != uint32(len(header)) {
+		return fmt.Errorf("unexpected header size %v instead of %v", hdrSize, len(header))
+	}
+	if len(decoded) != len(expected) {
+		return fmt.Errorf("pack header size mismatch")
+	}
+	for i := 0; i < len(decoded); i++ {
+		if decoded[i] != expected[i] {
+			return fmt.Errorf("pack header entry mismatch got %v instead of %v", decoded[i], expected[i])
+		}
+	}
 	return nil
 }
 
@@ -111,10 +133,10 @@ func (p *Packer) HeaderOverhead() int {
 }
 
 // makeHeader constructs the header for p.
-func (p *Packer) makeHeader() ([]byte, error) {
-	buf := make([]byte, 0, len(p.blobs)*int(entrySize))
+func makeHeader(blobs []restic.Blob) ([]byte, error) {
+	buf := make([]byte, 0, len(blobs)*int(entrySize))
 
-	for _, b := range p.blobs {
+	for _, b := range blobs {
 		switch {
 		case b.Type == restic.DataBlob && b.UncompressedLength == 0:
 			buf = append(buf, 0)
@@ -189,7 +211,7 @@ const (
 
 	// MaxHeaderSize is the max size of header including header-length field
 	MaxHeaderSize = 16*1024*1024 + headerLengthSize
-	// number of header enries to download as part of header-length request
+	// number of header entries to download as part of header-length request
 	eagerEntries = 15
 )
 
@@ -367,10 +389,10 @@ func CalculateHeaderSize(blobs []restic.Blob) int {
 // If onlyHdr is set to true, only the size of the header is returned
 // Note that this function only gives correct sizes, if there are no
 // duplicates in the index.
-func Size(ctx context.Context, mi restic.MasterIndex, onlyHdr bool) map[restic.ID]int64 {
+func Size(ctx context.Context, mi restic.MasterIndex, onlyHdr bool) (map[restic.ID]int64, error) {
 	packSize := make(map[restic.ID]int64)
 
-	mi.Each(ctx, func(blob restic.PackedBlob) {
+	err := mi.Each(ctx, func(blob restic.PackedBlob) {
 		size, ok := packSize[blob.PackID]
 		if !ok {
 			size = headerSize
@@ -381,5 +403,5 @@ func Size(ctx context.Context, mi restic.MasterIndex, onlyHdr bool) map[restic.I
 		packSize[blob.PackID] = size + int64(CalculateEntrySize(blob.Blob))
 	})
 
-	return packSize
+	return packSize, err
 }

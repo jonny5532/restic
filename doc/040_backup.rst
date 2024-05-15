@@ -56,6 +56,39 @@ snapshot for each volume that contains files to backup. Files are read from the
 VSS snapshot instead of the regular filesystem. This allows to backup files that are
 exclusively locked by another process during the backup.
 
+You can use additional options to change VSS behaviour:
+
+ * ``-o vss.timeout`` specifies timeout for VSS snapshot creation, the default value is 120 seconds
+ * ``-o vss.exclude-all-mount-points`` disable auto snapshotting of all volume mount points
+ * ``-o vss.exclude-volumes`` allows excluding specific volumes or volume mount points from snapshotting
+ * ``-o vss.provider`` specifies VSS provider used for snapshotting
+
+For example a 2.5 minutes timeout with snapshotting of mount points disabled can be specified as
+
+.. code-block:: console
+
+    -o vss.timeout=2m30s -o vss.exclude-all-mount-points=true
+
+and excluding drive ``d:\``, mount point ``c:\mnt`` and volume ``\\?\Volume{04ce0545-3391-11e0-ba2f-806e6f6e6963}\`` as
+
+.. code-block:: console
+
+    -o vss.exclude-volumes="d:;c:\mnt\;\\?\volume{04ce0545-3391-11e0-ba2f-806e6f6e6963}"
+
+VSS provider can be specified by GUID
+
+.. code-block:: console
+
+    -o vss.provider={3f900f90-00e9-440e-873a-96ca5eb079e5}
+
+or by name
+
+.. code-block:: console
+
+    -o vss.provider="Hyper-V IC Software Shadow Copy Provider"
+
+Also ``MS`` can be used as alias for ``Microsoft Software Shadow Copy provider 1.0``.
+
 By default VSS ignores Outlook OST files. This is not a restriction of restic
 but the default Windows VSS configuration. The files not to snapshot are
 configured in the Windows registry under the following key:
@@ -170,10 +203,10 @@ On **Unix** (including Linux and Mac), given that a file lives at the same
 location as a file in a previous backup, the following file metadata
 attributes have to match for its contents to be presumed unchanged:
 
- * Modification timestamp (mtime).
- * Metadata change timestamp (ctime).
- * File size.
- * Inode number (internal number used to reference a file in a filesystem).
+* Modification timestamp (mtime).
+* Metadata change timestamp (ctime).
+* File size.
+* Inode number (internal number used to reference a file in a filesystem).
 
 The reason for requiring both mtime and ctime to match is that Unix programs
 can freely change mtime (and some do). In such cases, a ctime change may be
@@ -182,9 +215,9 @@ the only hint that a file did change.
 The following ``restic backup`` command line flags modify the change detection
 rules:
 
- * ``--force``: turn off change detection and rescan all files.
- * ``--ignore-ctime``: require mtime to match, but allow ctime to differ.
- * ``--ignore-inode``: require mtime to match, but allow inode number
+* ``--force``: turn off change detection and rescan all files.
+* ``--ignore-ctime``: require mtime to match, but allow ctime to differ.
+* ``--ignore-inode``: require mtime to match, but allow inode number
    and ctime to differ.
 
 The option ``--ignore-inode`` exists to support FUSE-based filesystems and
@@ -250,9 +283,9 @@ It can be used like this:
 
 This instructs restic to exclude files matching the following criteria:
 
- * All files matching ``*.c`` (parameter ``--exclude``)
- * All files matching ``*.go`` (second line in ``excludes.txt``)
- * All files and sub-directories named ``bar`` which reside somewhere below a directory called ``foo`` (fourth line in ``excludes.txt``)
+* All files matching ``*.c`` (parameter ``--exclude``)
+* All files matching ``*.go`` (second line in ``excludes.txt``)
+* All files and sub-directories named ``bar`` which reside somewhere below a directory called ``foo`` (fourth line in ``excludes.txt``)
 
 Patterns use the syntax of the Go function
 `filepath.Match <https://pkg.go.dev/path/filepath#Match>`__
@@ -270,8 +303,8 @@ environment variable (depending on your operating system).
 
 Patterns need to match on complete path components. For example, the pattern ``foo``:
 
- * matches ``/dir1/foo/dir2/file`` and ``/dir/foo``
- * does not match ``/dir/foobar`` or ``barfoo``
+* matches ``/dir1/foo/dir2/file`` and ``/dir/foo``
+* does not match ``/dir/foobar`` or ``barfoo``
 
 A trailing ``/`` is ignored, a leading ``/`` anchors the pattern at the root directory.
 This means, ``/bin`` matches ``/bin/bash`` but does not match ``/usr/bin/restic``.
@@ -281,9 +314,9 @@ e.g. ``b*ash`` matches ``/bin/bash`` but does not match ``/bin/ash``. For this,
 the special wildcard ``**`` can be used to match arbitrary sub-directories: The
 pattern ``foo/**/bar`` matches:
 
- * ``/dir1/foo/dir2/bar/file``
- * ``/foo/bar/file``
- * ``/tmp/foo/bar``
+* ``/dir1/foo/dir2/bar/file``
+* ``/foo/bar/file``
+* ``/tmp/foo/bar``
 
 Spaces in patterns listed in an exclude file can be specified verbatim. That is,
 in order to exclude a file named ``foo bar star.txt``, put that just as it reads
@@ -298,9 +331,9 @@ some escaping in order to pass the name/pattern as a single argument to restic.
 
 On most Unixy shells, you can either quote or use backslashes. For example:
 
- * ``--exclude='foo bar star/foo.txt'``
- * ``--exclude="foo bar star/foo.txt"``
- * ``--exclude=foo\ bar\ star/foo.txt``
+* ``--exclude='foo bar star/foo.txt'``
+* ``--exclude="foo bar star/foo.txt"``
+* ``--exclude=foo\ bar\ star/foo.txt``
 
 If a pattern starts with exclamation mark and matches a file that
 was previously matched by a regular pattern, the match is cancelled.
@@ -381,8 +414,8 @@ contains one *pattern* per line. The file must be encoded as UTF-8, or UTF-16
 with a byte-order mark. Leading and trailing whitespace is removed from the
 patterns. Empty lines and lines starting with a ``#`` are ignored and each
 pattern is expanded when read, such that special characters in it are expanded
-using the Go function `filepath.Glob <https://pkg.go.dev/path/filepath#Glob>`__
-- please see its documentation for the syntax you can use in the patterns.
+according to the syntax described in the documentation of the Go function
+`filepath.Match <https://pkg.go.dev/path/filepath#Match>`__.
 
 The argument passed to ``--files-from-verbatim`` must be the name of a text file
 that contains one *path* per line, e.g. as generated by GNU ``find`` with the
@@ -481,14 +514,17 @@ written, and the next backup needs to write new metadata again. If you really
 want to save the access time for files and directories, you can pass the
 ``--with-atime`` option to the ``backup`` command.
 
+Backing up full security descriptors on Windows is only possible when the user 
+has ``SeBackupPrivilege``privilege or is running as admin. This is a restriction 
+of Windows not restic.
+If either of these conditions are not met, only the owner, group and DACL will 
+be backed up.
+
 Note that ``restic`` does not back up some metadata associated with files. Of
-particular note are::
+particular note are:
 
-  - file creation date on Unix platforms
-  - inode flags on Unix platforms
-  - file ownership and ACLs on Windows
-  - the "hidden" flag on Windows
-
+* File creation date on Unix platforms
+* Inode flags on Unix platforms
 
 Reading data from a command
 ***************************
@@ -513,7 +549,6 @@ A different name can be specified with ``--stdin-filename``:
 Restic uses the command exit code to determine whether the command succeeded. A
 non-zero exit code from the command causes restic to cancel the backup. This causes
 restic to fail with exit code 1. No snapshot will be created in this case.
-
 
 Reading data from stdin
 ***********************
@@ -554,7 +589,6 @@ whole chain return a non-zero exit code) and you must check the exit code of
 the pipe and act accordingly (e.g., remove the last backup). Refer to the
 `Use the Unofficial Bash Strict Mode <http://redsymbol.net/articles/unofficial-bash-strict-mode/>`__
 for more details on this.
-
 
 Tags for backup
 ***************
@@ -628,6 +662,12 @@ environment variables. The following lists these environment variables:
     AWS_DEFAULT_REGION                  Amazon S3 default region
     AWS_PROFILE                         Amazon credentials profile (alternative to specifying key and region)
     AWS_SHARED_CREDENTIALS_FILE         Location of the AWS CLI shared credentials file (default: ~/.aws/credentials)
+    RESTIC_AWS_ASSUME_ROLE_ARN          Amazon IAM Role ARN to assume using discovered credentials
+    RESTIC_AWS_ASSUME_ROLE_SESSION_NAME Session Name to use with the role assumption
+    RESTIC_AWS_ASSUME_ROLE_EXTERNAL_ID  External ID to use with the role assumption
+    RESTIC_AWS_ASSUME_ROLE_POLICY       Inline Amazion IAM session policy
+    RESTIC_AWS_ASSUME_ROLE_REGION       Region to use for IAM calls for the role assumption (default: us-east-1)
+    RESTIC_AWS_ASSUME_ROLE_STS_ENDPOINT URL to the STS endpoint (default is determined based on RESTIC_AWS_ASSUME_ROLE_REGION). You generally do not need to set this, advanced use only.
 
     AZURE_ACCOUNT_NAME                  Account name for Azure
     AZURE_ACCOUNT_KEY                   Account key for Azure
@@ -678,15 +718,14 @@ The external programs that restic may execute include ``rclone`` (for rclone
 backends) and ``ssh`` (for the SFTP backend). These may respond to further
 environment variables and configuration files; see their respective manuals.
 
-
 Exit status codes
 *****************
 
 Restic returns one of the following exit status codes after the backup command is run:
 
- * 0 when the backup was successful (snapshot with all source files created)
- * 1 when there was a fatal error (no snapshot created)
- * 3 when some source files could not be read (incomplete snapshot with remaining files created)
+* 0 when the backup was successful (snapshot with all source files created)
+* 1 when there was a fatal error (no snapshot created)
+* 3 when some source files could not be read (incomplete snapshot with remaining files created)
 
 Fatal errors occur for example when restic is unable to write to the backup destination, when
 there are network connectivity issues preventing successful communication, or when an invalid

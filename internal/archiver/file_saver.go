@@ -16,7 +16,7 @@ import (
 )
 
 // SaveBlobFn saves a blob to a repo.
-type SaveBlobFn func(context.Context, restic.BlobType, *Buffer, func(res SaveBlobResponse))
+type SaveBlobFn func(context.Context, restic.BlobType, *Buffer, string, func(res SaveBlobResponse))
 
 // FileSaver concurrently saves incoming files to the repo.
 type FileSaver struct {
@@ -29,7 +29,7 @@ type FileSaver struct {
 
 	CompleteBlob func(bytes uint64)
 
-	NodeFromFileInfo func(snPath, filename string, fi os.FileInfo) (*restic.Node, error)
+	NodeFromFileInfo func(snPath, filename string, fi os.FileInfo, ignoreXattrListError bool) (*restic.Node, error)
 }
 
 // NewFileSaver returns a new file saver. A worker pool with fileWorkers is
@@ -156,7 +156,7 @@ func (s *FileSaver) saveFile(ctx context.Context, chnker *chunker.Chunker, snPat
 
 	debug.Log("%v", snPath)
 
-	node, err := s.NodeFromFileInfo(snPath, f.Name(), fi)
+	node, err := s.NodeFromFileInfo(snPath, f.Name(), fi, false)
 	if err != nil {
 		_ = f.Close()
 		completeError(err)
@@ -205,7 +205,7 @@ func (s *FileSaver) saveFile(ctx context.Context, chnker *chunker.Chunker, snPat
 		node.Content = append(node.Content, restic.ID{})
 		lock.Unlock()
 
-		s.saveBlob(ctx, restic.DataBlob, buf, func(sbr SaveBlobResponse) {
+		s.saveBlob(ctx, restic.DataBlob, buf, target, func(sbr SaveBlobResponse) {
 			lock.Lock()
 			if !sbr.known {
 				fnr.stats.DataBlobs++

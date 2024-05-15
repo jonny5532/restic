@@ -3,9 +3,12 @@
 
 package restic
 
-import "syscall"
+import (
+	"os"
+	"syscall"
+)
 
-func (node Node) restoreSymlinkTimestamps(path string, utimes [2]syscall.Timespec) error {
+func (node Node) restoreSymlinkTimestamps(_ string, _ [2]syscall.Timespec) error {
 	return nil
 }
 
@@ -30,7 +33,21 @@ func Listxattr(path string) ([]string, error) {
 	return nil, nil
 }
 
+func IsListxattrPermissionError(_ error) bool {
+	return false
+}
+
 // Setxattr is a no-op on AIX.
 func Setxattr(path, name string, data []byte) error {
 	return nil
+}
+
+// restoreGenericAttributes is no-op on AIX.
+func (node *Node) restoreGenericAttributes(_ string, warn func(msg string)) error {
+	return node.handleAllUnknownGenericAttributesFound(warn)
+}
+
+// fillGenericAttributes is a no-op on AIX.
+func (node *Node) fillGenericAttributes(_ string, _ os.FileInfo, _ *statT) (allowExtended bool, err error) {
+	return true, nil
 }

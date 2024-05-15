@@ -66,22 +66,11 @@ func init() {
 }
 
 func runRepairSnapshots(ctx context.Context, gopts GlobalOptions, opts RepairOptions, args []string) error {
-	repo, err := OpenRepository(ctx, gopts)
+	ctx, repo, unlock, err := openWithExclusiveLock(ctx, gopts, opts.DryRun)
 	if err != nil {
 		return err
 	}
-
-	if !opts.DryRun {
-		var lock *restic.Lock
-		var err error
-		lock, ctx, err = lockRepoExclusive(ctx, repo, gopts.RetryLock, gopts.JSON)
-		defer unlockRepo(lock)
-		if err != nil {
-			return err
-		}
-	} else {
-		repo.SetDryRun()
-	}
+	defer unlock()
 
 	snapshotLister, err := restic.MemorizeList(ctx, repo, restic.SnapshotFile)
 	if err != nil {
@@ -125,7 +114,7 @@ func runRepairSnapshots(ctx context.Context, gopts GlobalOptions, opts RepairOpt
 			node.Size = newSize
 			return node
 		},
-		RewriteFailedTree: func(nodeID restic.ID, path string, _ error) (restic.ID, error) {
+		RewriteFailedTree: func(_ restic.ID, path string, _ error) (restic.ID, error) {
 			if path == "/" {
 				Verbosef("  dir %q: not readable\n", path)
 				// remove snapshots with invalid root node
@@ -144,17 +133,20 @@ func runRepairSnapshots(ctx context.Context, gopts GlobalOptions, opts RepairOpt
 
 	changedCount := 0
 	for sn := range FindFilteredSnapshots(ctx, snapshotLister, repo, &opts.SnapshotFilter, args) {
-		Verbosef("\nsnapshot %s of %v at %s)\n", sn.ID().Str(), sn.Paths, sn.Time)
+		Verbosef("\n%v\n", sn)
 		changed, err := filterAndReplaceSnapshot(ctx, repo, sn,
 			func(ctx context.Context, sn *restic.Snapshot) (restic.ID, error) {
 				return rewriter.RewriteTree(ctx, repo, "/", *sn.Tree)
-			}, opts.DryRun, opts.Forget, "repaired")
+			}, opts.DryRun, opts.Forget, nil, "repaired")
 		if err != nil {
 			return errors.Fatalf("unable to rewrite snapshot ID %q: %v", sn.ID().Str(), err)
 		}
 		if changed {
 			changedCount++
 		}
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	Verbosef("\n")

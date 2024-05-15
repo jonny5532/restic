@@ -76,6 +76,10 @@ Similarly, if a repository is repeatedly damaged, please open an `issue on Githu
 somewhere. Please include the check output and additional information that might
 help locate the problem.
 
+If ``check`` detects damaged pack files, it will show instructions on how to repair
+them using the ``repair pack`` command. Use that command instead of the "Repair the
+index" section in this guide.
+
 
 2. Backup the repository
 ************************
@@ -103,6 +107,11 @@ whether your issue is already known and solved. Please take a look at the
 
 3. Repair the index
 *******************
+
+.. note::
+
+  If the `check` command tells you to run `restic repair pack`, then use that
+  command instead. It will repair the damaged pack files and also update the index.
 
 Restic relies on its index to contain correct information about what data is
 stored in the repository. Thus, the first step to repair a repository is to
@@ -153,7 +162,7 @@ command will automatically remove the original, damaged snapshots.
 
   $ restic repair snapshots --forget
 
-  snapshot 6979421e of [/home/user/restic/restic] at 2022-11-02 20:59:18.617503315 +0100 CET)
+  snapshot 6979421e of [/home/user/restic/restic] at 2022-11-02 20:59:18.617503315 +0100 CET by user@host
     file "/restic/internal/fuse/snapshots_dir.go": removed missing content
     file "/restic/internal/restorer/restorer_unix_test.go": removed missing content
     file "/restic/internal/walker/walker.go": removed missing content

@@ -26,6 +26,7 @@ type Repository interface {
 
 	Index() MasterIndex
 	LoadIndex(context.Context, *progress.Counter) error
+	ClearIndex()
 	SetIndex(MasterIndex) error
 	LookupBlobSize(ID, BlobType) (uint, bool)
 
@@ -44,6 +45,7 @@ type Repository interface {
 	ListPack(context.Context, ID, int64) ([]Blob, uint32, error)
 
 	LoadBlob(context.Context, BlobType, ID, []byte) ([]byte, error)
+	LoadBlobsFromPack(ctx context.Context, packID ID, blobs []Blob, handleBlobFn func(blob BlobHandle, buf []byte, err error) error) error
 	SaveBlob(context.Context, BlobType, []byte, ID, bool) (ID, bool, int, error)
 
 	// StartPackUploader start goroutines to upload new pack files. The errgroup
@@ -88,20 +90,32 @@ type PackBlobs struct {
 	Blobs  []Blob
 }
 
+type MasterIndexSaveOpts struct {
+	SaveProgress   *progress.Counter
+	DeleteProgress func() *progress.Counter
+	DeleteReport   func(id ID, err error)
+	SkipDeletion   bool
+}
+
 // MasterIndex keeps track of the blobs are stored within files.
 type MasterIndex interface {
 	Has(BlobHandle) bool
 	Lookup(BlobHandle) []PackedBlob
 
 	// Each runs fn on all blobs known to the index. When the context is cancelled,
-	// the index iteration return immediately. This blocks any modification of the index.
-	Each(ctx context.Context, fn func(PackedBlob))
+	// the index iteration returns immediately with ctx.Err(). This blocks any modification of the index.
+	Each(ctx context.Context, fn func(PackedBlob)) error
 	ListPacks(ctx context.Context, packs IDSet) <-chan PackBlobs
 
-	Save(ctx context.Context, repo SaverUnpacked, packBlacklist IDSet, extraObsolete IDs, p *progress.Counter) (obsolete IDSet, err error)
+	Save(ctx context.Context, repo Repository, excludePacks IDSet, extraObsolete IDs, opts MasterIndexSaveOpts) error
 }
 
 // Lister allows listing files in a backend.
 type Lister interface {
 	List(ctx context.Context, t FileType, fn func(ID, int64) error) error
+}
+
+type ListerLoaderUnpacked interface {
+	Lister
+	LoaderUnpacked
 }

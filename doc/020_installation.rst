@@ -77,12 +77,17 @@ avoid any conflicts:
 macOS
 =====
 
-If you are using macOS, you can install restic using the
-`homebrew <https://brew.sh/>`__ package manager:
+If you are using macOS, you can install restic using `Homebrew <https://brew.sh/>`__:
 
 .. code-block:: console
 
     $ brew install restic
+
+On Linux and macOS, you can also install it using `pkgx <https://pkgx.sh/>`__:
+
+.. code-block:: console
+
+    $ pkgx install restic
 
 You may also install it using `MacPorts <https://www.macports.org/>`__:
 
@@ -357,3 +362,18 @@ Example for using sudo to write a zsh completion script directly to the system-w
    the operating system used, e.g. ``/usr/share/bash-completion/completions/restic``
    in Debian and derivatives. Please look up the correct path in the appropriate
    documentation.
+
+Example for setting up a powershell completion script for the local user's profile:
+
+.. code-block:: pwsh-session
+
+    # Create profile if one does not exist
+    PS> If (!(Test-Path $PROFILE.CurrentUserAllHosts)) {New-Item -Path $PROFILE.CurrentUserAllHosts -Force}
+
+    PS> $ProfileDir = (Get-Item $PROFILE.CurrentUserAllHosts).Directory
+
+    # Generate Restic completions in the same directory as the profile
+    PS> restic generate --powershell-completion "$ProfileDir\restic-completion.ps1"
+
+    # Append to the profile file the command to load Restic completions
+    PS> Add-Content -Path $PROFILE.CurrentUserAllHosts -Value "`r`nImport-Module $ProfileDir\restic-completion.ps1"

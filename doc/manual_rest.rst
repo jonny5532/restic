@@ -112,7 +112,7 @@ command:
           --iexclude pattern                       same as --exclude pattern but ignores the casing of filenames
           --iexclude-file file                     same as --exclude-file but ignores casing of filenames in patterns
           --ignore-ctime                           ignore ctime changes when checking for modified files
-          --ignore-inode                           ignore inode number changes when checking for modified files
+          --ignore-inode                           ignore inode number and ctime changes when checking for modified files
           --no-scan                                do not run scanner to estimate size of backup
       -x, --one-file-system                        exclude other file systems, don't cross filesystem boundaries and subvolumes
           --parent snapshot                        use this parent snapshot (default: latest snapshot in the group determined by --group-by and not newer than the timestamp determined by --time)
@@ -148,11 +148,11 @@ command:
       -v, --verbose                    be verbose (specify multiple times or a level using --verbose=n, max level/times is 2)
 
 Subcommands that support showing progress information such as ``backup``,
-``check`` and ``prune`` will do so unless the quiet flag ``-q`` or
-``--quiet`` is set. When running from a non-interactive console progress
-reporting is disabled by default to not fill your logs. For interactive
-and non-interactive consoles the environment variable ``RESTIC_PROGRESS_FPS``
-can be used to control the frequency of progress reporting. Use for example
+``restore``, ``check`` and ``prune`` will do so unless the quiet flag ``-q``
+or ``--quiet`` is set. When running from a non-interactive console progress
+reporting is disabled by default to not fill your logs. For interactive and
+non-interactive consoles the environment variable ``RESTIC_PROGRESS_FPS`` can
+be used to control the frequency of progress reporting. Use for example
 ``0.016666`` to only update the progress once per minute.
 
 Additionally, on Unix systems if ``restic`` receives a SIGUSR1 signal the
@@ -428,10 +428,10 @@ This allows faster operations, since meta data does not need to be loaded from
 a remote repository. The cache is automatically created, usually in an
 OS-specific cache folder:
 
- * Linux/other: ``$XDG_CACHE_HOME/restic``, or ``~/.cache/restic`` if
-   ``XDG_CACHE_HOME`` is not set
- * macOS: ``~/Library/Caches/restic``
- * Windows: ``%LOCALAPPDATA%/restic``
+* Linux/other: ``$XDG_CACHE_HOME/restic``, or ``~/.cache/restic`` if
+  ``XDG_CACHE_HOME`` is not set
+* macOS: ``~/Library/Caches/restic``
+* Windows: ``%LOCALAPPDATA%/restic``
 
 If the relevant environment variables are not set, restic exits with an error
 message.
